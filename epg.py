@@ -31,6 +31,7 @@ import json
 import re
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 import xml.sax.saxutils as sax
@@ -320,6 +321,16 @@ def _clean(text, limit=1200):
     return text[:limit]
 
 
+def _norm_name(text):
+    """Nombre comparable: sin acentos, sin HD/UHD y sin puntuación."""
+    text = unicodedata.normalize('NFKD', text or '')
+    text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.lower()
+    text = re.sub(r'\b(uhd|fhd|hd|sd)\b', ' ', text)
+    text = re.sub(r'[^a-z0-9]+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
 def _esc(text):
     return sax.escape(_clean(text), {'"': '&quot;'})
 
@@ -398,6 +409,22 @@ def main():
     print(f'{len(canales_lista)} canales en la lista de Vodafone TV')
     programas, desde = epg_canales(
         canales_lista, max(args.days), workers=args.workers)
+
+    # Varias señales pueden compartir dial y nombre (p. ej. La 2 / La 2 HD o
+    # las dos copias de Canal 24 Horas). Nos quedamos con la que más guía trae.
+    mejores = {}
+    for ch in canales_lista:
+        key = (ch['num'], _norm_name(ch['names'][0] if ch['names'] else ''))
+        count = len(programas.get(ch['epg'], []))
+        if key not in mejores or count > mejores[key][0]:
+            mejores[key] = (count, ch)
+    canales_lista = sorted(
+        (item[1] for item in mejores.values()),
+        key=lambda c: (c['num'] is None, c['num'] or 9999,
+                       c['names'][0].lower() if c['names'] else ''))
+    for ch in canales_lista:
+        programas.setdefault(ch['epg'], [])
+    programas = {ch['epg']: programas[ch['epg']] for ch in canales_lista}
 
     con_guia = [c for c in canales_lista if programas.get(c['epg'])]
     print(f'canales con guía: {len(con_guia)} | sin guía: '
