@@ -51,13 +51,21 @@ TIMEOUT = 40
 
 
 # ------------------------------------------------------------------ HTTP
-def _post(service, payload, timeout=TIMEOUT):
+def _post(service, payload, timeout=TIMEOUT, retries=3):
     body = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(
-        API + service, data=body,
-        headers={'Content-Type': 'application/json', 'User-Agent': UA})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode('utf-8'))
+    last = None
+    for attempt in range(retries):
+        req = urllib.request.Request(
+            API + service, data=body,
+            headers={'Content-Type': 'application/json', 'User-Agent': UA})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode('utf-8'))
+        except Exception as exc:  # timeout, 5xx, red...
+            last = exc
+            if attempt + 1 < retries:
+                time.sleep(1.5 * (attempt + 1))
+    raise last
 
 
 def _get_json(url, timeout=TIMEOUT):
